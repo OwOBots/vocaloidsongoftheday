@@ -13,7 +13,7 @@ import blueauth
 db = VocaDB()
 logger.add(sys.stderr, format="{time} {level} {message}", filter="main", level="INFO")
 def rand():
-    rng = random.randint(0, 10000)
+    rng = random.randint(0, 1000000)
     song = db.song(song_id=rng, fields="pvs")
     logger.debug(f"Trying to fetch song with ID {rng}")
     if song is not None:
@@ -54,7 +54,7 @@ def build_bsky_embed(client, url: str):
 
 def post(client, platform: str, text: str, url: str):
     if platform == "twitter":
-        client.create_tweet(text=f"{text}\n{url}")
+        client.create_tweet(text=f"{text}\n{url}", user_auth=False)
     else:
         tb = client_utils.TextBuilder().text(text)
         embed = build_bsky_embed(client, url)
@@ -67,7 +67,7 @@ def main():
     args = parser.parse_args()
 
     if args.platform == "twitter":
-        client = twitterauth.get_client()
+        client = twitterauth.localhost_login()
     else:
         client = blueauth.blue_login()
 

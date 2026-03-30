@@ -54,7 +54,7 @@ def build_bsky_embed(client, url: str):
 
 def post(client, platform: str, text: str, url: str):
     if platform == "twitter":
-        client.create_tweet(text=f"{text}\n{url}", user_auth=False)
+        client.create_tweet(text=f"{text}\n{url}")
     else:
         tb = client_utils.TextBuilder().text(text)
         embed = build_bsky_embed(client, url)

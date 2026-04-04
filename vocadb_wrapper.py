@@ -2,7 +2,9 @@
 import requests
 from loguru import logger
 
-
+# this is a wrapper. i want to make a standalone version of this wrapper for pip. but i dont want that burden. so i'm just putting it here for now. it's not really worth testing since it's mostly just plumbing to the API, and the API is well-documented and stable.
+# https://vocadb.net/swagger/index.html
+# if i were to make a standalone package, i'd want to add some caching and rate limit handling, but for now this is fine. the API is pretty fast and i won't be making that many requests.
 class VocaDB:
     """Client for the VocaDB REST API (https://vocadb.net/api).
 

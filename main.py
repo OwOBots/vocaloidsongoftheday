@@ -72,16 +72,27 @@ def main():
         client = blueauth.blue_login()
 
     logger.info(f"Posting to {args.platform}")
-
+    max_song_attempts = 50
     while True:
         pv_url = None
         song = None
-        while pv_url is None:
-            song = rand()
+        for _ in range(max_song_attempts):
+            try:
+                song = rand()
+            except Exception as e:
+                logger.warning(f"VocaDB API error: {e}")
+                time.sleep(5)
+                continue
             if song is None:
                 continue
             logger.info(f"Fetched song: {song['name']} (ID: {song['id']})")
             pv_url = pvChecker(song)
+            if pv_url is not None:
+                break
+        if pv_url is None:
+            logger.error(f"Failed to find a song with a YouTube PV after {max_song_attempts} attempts, will retry next cycle.")
+            time.sleep(6 * 60 * 60)
+            continue
 
         text = f"Vocaloid song of the day: {song['name']}"
         for attempt in range(5):
@@ -93,6 +104,7 @@ def main():
                 logger.warning(f"Post failed (attempt {attempt + 1}/5): {e}")
                 time.sleep(30 * (attempt + 1))
         else:
+            # dear god.. if we failed 5 times in a row, something is really wrong and we should wait a long time before trying again
             logger.error("Failed to post after 5 attempts, will retry next cycle.")
         time.sleep(6 * 60 * 60)
 

@@ -125,3 +125,105 @@ class TestBuildBskyEmbed:
             description="",
             thumb="blob_ref",
         )
+
+
+class TestMainRetryLogic:
+    """Tests for the retry and error handling logic in main()."""
+
+    @patch("main.time.sleep")
+    @patch("main.post")
+    @patch("main.pvChecker", return_value="https://www.youtube.com/watch?v=abc")
+    @patch("main.rand", return_value={"name": "Melt", "id": 1, "pvs": []})
+    @patch("main.blueauth.blue_login", return_value=MagicMock())
+    @patch("main.argparse.ArgumentParser")
+    def test_posts_successfully_on_first_try(
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_post, mock_sleep
+    ):
+        from main import main
+
+        mock_argparse.return_value.parse_args.return_value = MagicMock(platform="bluesky")
+        # Break out of the while True loop after one cycle
+        mock_sleep.side_effect = [StopIteration]
+        with pytest.raises(StopIteration):
+            main()
+        mock_post.assert_called_once()
+
+    @patch("main.time.sleep")
+    @patch("main.post")
+    @patch("main.pvChecker", return_value="https://www.youtube.com/watch?v=abc")
+    @patch("main.rand")
+    @patch("main.blueauth.blue_login", return_value=MagicMock())
+    @patch("main.argparse.ArgumentParser")
+    def test_retries_on_api_exception(
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_post, mock_sleep
+    ):
+        from main import main
+
+        mock_argparse.return_value.parse_args.return_value = MagicMock(platform="bluesky")
+        # First call raises, second call succeeds
+        mock_rand.side_effect = [
+            Exception("VocaDB 404"),
+            {"name": "Melt", "id": 1, "pvs": []},
+        ]
+        mock_sleep.side_effect = [None, StopIteration]  # first sleep is the 5s retry delay
+        with pytest.raises(StopIteration):
+            main()
+        assert mock_rand.call_count == 2
+        mock_post.assert_called_once()
+
+    @patch("main.time.sleep")
+    @patch("main.post")
+    @patch("main.pvChecker", return_value=None)
+    @patch("main.rand", return_value={"name": "No YT", "id": 1, "pvs": []})
+    @patch("main.blueauth.blue_login", return_value=MagicMock())
+    @patch("main.argparse.ArgumentParser")
+    def test_gives_up_after_max_attempts(
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_post, mock_sleep
+    ):
+        from main import main
+
+        mock_argparse.return_value.parse_args.return_value = MagicMock(platform="bluesky")
+        # The 6hr sleep after exhausting attempts, then break
+        mock_sleep.side_effect = StopIteration
+        with pytest.raises(StopIteration):
+            main()
+        assert mock_rand.call_count == 50
+        mock_post.assert_not_called()
+
+    @patch("main.time.sleep")
+    @patch("main.post")
+    @patch("main.pvChecker", return_value="https://www.youtube.com/watch?v=abc")
+    @patch("main.rand", return_value={"name": "Melt", "id": 1, "pvs": []})
+    @patch("main.blueauth.blue_login", return_value=MagicMock())
+    @patch("main.argparse.ArgumentParser")
+    def test_retries_failed_posts(
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_post, mock_sleep
+    ):
+        from main import main
+
+        mock_argparse.return_value.parse_args.return_value = MagicMock(platform="bluesky")
+        # Post fails twice, then succeeds
+        mock_post.side_effect = [Exception("network"), Exception("timeout"), None]
+        mock_sleep.side_effect = [None, None, StopIteration]  # two backoff sleeps + final cycle sleep
+        with pytest.raises(StopIteration):
+            main()
+        assert mock_post.call_count == 3
+
+    @patch("main.time.sleep")
+    @patch("main.post")
+    @patch("main.pvChecker", return_value="https://www.youtube.com/watch?v=abc")
+    @patch("main.rand", return_value={"name": "Melt", "id": 1, "pvs": []})
+    @patch("main.blueauth.blue_login", return_value=MagicMock())
+    @patch("main.argparse.ArgumentParser")
+    def test_gives_up_posting_after_5_failures(
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_post, mock_sleep
+    ):
+        from main import main
+
+        mock_argparse.return_value.parse_args.return_value = MagicMock(platform="bluesky")
+        mock_post.side_effect = Exception("always fails")
+        # 5 backoff sleeps + final cycle sleep, then break
+        mock_sleep.side_effect = [None, None, None, None, None, StopIteration]
+        with pytest.raises(StopIteration):
+            main()
+        assert mock_post.call_count == 5

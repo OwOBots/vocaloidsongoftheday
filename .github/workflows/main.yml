@@ -1,0 +1,36 @@
+name: Run Python tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    # Step 1: check out the repository code
+    - name: Check out code
+      uses: actions/checkout@v6
+
+    # Step 2: install UV with caching enabled
+    - name: Install UV
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        python-version: "3.13"
+
+    # Step 3: install Python version
+    - name: Install Python
+      run: uv python install
+
+    # Step 4: install dependencies, including development dependencies
+    - name: Install dependencies
+      run: uv sync --all-extras --dev
+
+    # Step 5: run tests using pytest via uv run
+    - name: Run tests with pytest
+      run: uv run pytest tests/
+      # Replace 'tests/' with your actual test directory if different

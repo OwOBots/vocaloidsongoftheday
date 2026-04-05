@@ -51,7 +51,8 @@ def build_bsky_embed(client, url: str):
         )
     )
 
-
+# at some point im gonna add fediverse but the apis for them depends
+# on the specific platform so for now this is just twitter and bluesky
 def post(client, platform: str, text: str, url: str):
     if platform == "twitter":
         client.create_tweet(text=f"{text}\n{url}")
@@ -110,4 +111,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    while True:
+        try:
+            main()
+            logger.error("Main loop exited unexpectedly, restarting in 30s...")
+        except KeyboardInterrupt:
+            logger.info("Shutting down gracefully...")
+            break
+        except Exception as e:
+            logger.error(f"Bot crashed: {e}, restarting in 30s...")
+        time.sleep(30)

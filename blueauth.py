@@ -7,7 +7,12 @@ from dotenv import load_dotenv
 from loguru import logger as LOG
 load_dotenv()
 
+#TODO: swap to the fork with a oauth version, the "main" version dont have oauth out the box
+# i want to replace this with the oauth fork. but i fear it may break. the oauth version is here:
+# https://github.com/MarshalX/atproto/pull/636
 
+# simple helper to check that the required env vars are set before we try to log in to bluesky. this is separate from the twitter auth stuff since the bluesky client will just throw
+# a generic error if the vars are missing, and this way we can log a more specific message about which var is missing instead of just "invalid credentials" or whatever
 
 def ReqVars():
     required_vars = ['APU', 'AP']

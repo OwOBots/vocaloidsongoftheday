@@ -1,23 +1,25 @@
+import datetime
+import json
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, mock_open
 
 
 class TestRand:
     @patch("main.db")
     @patch("main.random.randint", return_value=500)
     def test_rand_returns_song(self, mock_randint, mock_db):
-        from main import rand
+        from main import song_id_random
         mock_db.song.return_value = {"name": "Melt", "id": 500}
-        result = rand()
+        result = song_id_random()
         assert result == {"name": "Melt", "id": 500}
-        mock_db.song.assert_called_once_with(song_id=500, fields="pvs")
+        mock_db.song.assert_called_once_with(song_id=500, fields="pvs,Artists,Albums")
 
     @patch("main.db")
     @patch("main.random.randint", return_value=999999)
     def test_rand_returns_none_when_no_song(self, mock_randint, mock_db):
-        from main import rand
+        from main import song_id_random
         mock_db.song.return_value = None
-        result = rand()
+        result = song_id_random()
         assert result is None
 
 
@@ -70,6 +72,75 @@ class TestPvChecker:
         }
         assert pvChecker(song) == "https://www.youtube.com/watch?v=first"
 
+    def test_rejects_spoofed_youtube_domain(self):
+        from main import pvChecker
+        song = {
+            "name": "Spoofed",
+            "pvs": [
+                {"url": "https://notyoutube.com/watch?v=abc"},
+                {"url": "https://youtube.com.evil.com/watch?v=abc"},
+                {"url": "https://youtu.be.evil.com/xyz"},
+            ],
+        }
+        assert pvChecker(song) is None
+
+
+class TestTxtBuilder:
+    TEMPLATES_JSON = json.dumps({
+        "templates": ["{name} by {artists}"],
+        "album_suffixes": [" from {album}"],
+        "umamusume shitposting": ["uma: {name} by {artists}"],
+    })
+
+    def test_normal_template(self):
+        from main import txt_builder
+        song = {"name": "Melt", "artists": [{"name": "ryo"}], "albums": []}
+        with patch("builtins.open", mock_open(read_data=self.TEMPLATES_JSON)):
+            result = txt_builder(song)
+        assert result == "Melt by ryo"
+
+    def test_multiple_artists(self):
+        from main import txt_builder
+        song = {"name": "Melt", "artists": [{"name": "ryo"}, {"name": "supercell"}], "albums": []}
+        with patch("builtins.open", mock_open(read_data=self.TEMPLATES_JSON)):
+            result = txt_builder(song)
+        assert result == "Melt by ryo, supercell"
+
+    def test_unknown_artists_when_empty(self):
+        from main import txt_builder
+        song = {"name": "Melt", "artists": [], "albums": []}
+        with patch("builtins.open", mock_open(read_data=self.TEMPLATES_JSON)):
+            result = txt_builder(song)
+        assert result == "Melt by unknown"
+
+    def test_unknown_artists_when_missing(self):
+        from main import txt_builder
+        song = {"name": "Melt", "albums": []}
+        with patch("builtins.open", mock_open(read_data=self.TEMPLATES_JSON)):
+            result = txt_builder(song)
+        assert result == "Melt by unknown"
+
+    def test_album_suffix_appended(self):
+        from main import txt_builder
+        song = {"name": "Melt", "artists": [{"name": "ryo"}], "albums": [{"name": "supercell"}]}
+        with patch("builtins.open", mock_open(read_data=self.TEMPLATES_JSON)):
+            result = txt_builder(song)
+        assert result == "Melt by ryo from supercell"
+
+    def test_feb_24_template(self):
+        from main import txt_builder
+        song = {"name": "Melt", "artists": [{"name": "ryo"}], "albums": []}
+        with patch("builtins.open", mock_open(read_data=self.TEMPLATES_JSON)):
+            result = txt_builder(song, override_date=datetime.date(2000, 2, 24))
+        assert result == "uma: Melt by ryo"
+
+    def test_fallback_on_error(self):
+        from main import txt_builder
+        song = {"name": "Melt", "artists": [{"name": "ryo"}]}
+        with patch("builtins.open", side_effect=FileNotFoundError):
+            result = txt_builder(song)
+        assert result == "Vocaloid song of the day: Melt by ryo"
+
 
 class TestPost:
     @patch("main.build_bsky_embed")
@@ -94,6 +165,15 @@ class TestPost:
         mock_client.create_tweet.assert_called_once_with(
             text="song of the day\nhttps://youtube.com/x"
         )
+
+    def test_post_dry_run(self):
+        from main import post
+        post(None, "dry-run", "song of the day", "https://youtube.com/x")
+
+    def test_post_unsupported_platform(self):
+        from main import post
+        with pytest.raises(ValueError, match="Unsupported platform"):
+            post(None, "mastodon", "song of the day", "https://youtube.com/x")
 
 
 class TestBuildBskyEmbed:
@@ -132,12 +212,13 @@ class TestMainRetryLogic:
 
     @patch("main.time.sleep")
     @patch("main.post")
+    @patch("main.txt_builder", return_value="test text")
     @patch("main.pvChecker", return_value="https://www.youtube.com/watch?v=abc")
-    @patch("main.rand", return_value={"name": "Melt", "id": 1, "pvs": []})
+    @patch("main.song_id_random", return_value={"name": "Melt", "id": 1, "pvs": []})
     @patch("main.blueauth.blue_login", return_value=MagicMock())
     @patch("main.argparse.ArgumentParser")
     def test_posts_successfully_on_first_try(
-        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_post, mock_sleep
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep
     ):
         from main import main
 
@@ -150,12 +231,13 @@ class TestMainRetryLogic:
 
     @patch("main.time.sleep")
     @patch("main.post")
+    @patch("main.txt_builder", return_value="test text")
     @patch("main.pvChecker", return_value="https://www.youtube.com/watch?v=abc")
-    @patch("main.rand")
+    @patch("main.song_id_random")
     @patch("main.blueauth.blue_login", return_value=MagicMock())
     @patch("main.argparse.ArgumentParser")
     def test_retries_on_api_exception(
-        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_post, mock_sleep
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep
     ):
         from main import main
 
@@ -173,12 +255,13 @@ class TestMainRetryLogic:
 
     @patch("main.time.sleep")
     @patch("main.post")
+    @patch("main.txt_builder", return_value="test text")
     @patch("main.pvChecker", return_value=None)
-    @patch("main.rand", return_value={"name": "No YT", "id": 1, "pvs": []})
+    @patch("main.song_id_random", return_value={"name": "No YT", "id": 1, "pvs": []})
     @patch("main.blueauth.blue_login", return_value=MagicMock())
     @patch("main.argparse.ArgumentParser")
     def test_gives_up_after_max_attempts(
-        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_post, mock_sleep
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep
     ):
         from main import main
 
@@ -192,12 +275,13 @@ class TestMainRetryLogic:
 
     @patch("main.time.sleep")
     @patch("main.post")
+    @patch("main.txt_builder", return_value="test text")
     @patch("main.pvChecker", return_value="https://www.youtube.com/watch?v=abc")
-    @patch("main.rand", return_value={"name": "Melt", "id": 1, "pvs": []})
+    @patch("main.song_id_random", return_value={"name": "Melt", "id": 1, "pvs": []})
     @patch("main.blueauth.blue_login", return_value=MagicMock())
     @patch("main.argparse.ArgumentParser")
     def test_retries_failed_posts(
-        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_post, mock_sleep
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep
     ):
         from main import main
 
@@ -211,12 +295,13 @@ class TestMainRetryLogic:
 
     @patch("main.time.sleep")
     @patch("main.post")
+    @patch("main.txt_builder", return_value="test text")
     @patch("main.pvChecker", return_value="https://www.youtube.com/watch?v=abc")
-    @patch("main.rand", return_value={"name": "Melt", "id": 1, "pvs": []})
+    @patch("main.song_id_random", return_value={"name": "Melt", "id": 1, "pvs": []})
     @patch("main.blueauth.blue_login", return_value=MagicMock())
     @patch("main.argparse.ArgumentParser")
     def test_gives_up_posting_after_5_failures(
-        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_post, mock_sleep
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep
     ):
         from main import main
 
@@ -227,3 +312,79 @@ class TestMainRetryLogic:
         with pytest.raises(StopIteration):
             main()
         assert mock_post.call_count == 5
+
+
+class TestMainDryRun:
+    @patch("main.post")
+    @patch("main.txt_builder", return_value="test text")
+    @patch("main.pvChecker", return_value="https://www.youtube.com/watch?v=abc")
+    @patch("main.song_id_random", return_value={"name": "Melt", "id": 1, "pvs": []})
+    @patch("main.argparse.ArgumentParser")
+    def test_dry_run_exits_with_done(self, mock_argparse, mock_rand, mock_pv, mock_txt, mock_post):
+        from main import main
+        mock_argparse.return_value.parse_args.return_value = MagicMock(platform="dry-run", date=None)
+        result = main()
+        assert result == "done"
+        mock_post.assert_called_once_with(None, "dry-run", "test text", "https://www.youtube.com/watch?v=abc")
+
+    @patch("main.post")
+    @patch("main.txt_builder", return_value="test text")
+    @patch("main.pvChecker", return_value="https://www.youtube.com/watch?v=abc")
+    @patch("main.song_id_random", return_value={"name": "Melt", "id": 1, "pvs": []})
+    @patch("main.argparse.ArgumentParser")
+    def test_dry_run_date_override(self, mock_argparse, mock_rand, mock_pv, mock_txt, mock_post):
+        from main import main
+        mock_argparse.return_value.parse_args.return_value = MagicMock(platform="dry-run", date="02-24")
+        main()
+        mock_txt.assert_called_once()
+        _, kwargs = mock_txt.call_args
+        assert kwargs["override_date"] == datetime.date(2000, 2, 24)
+
+    @patch("main.pvChecker", return_value=None)
+    @patch("main.song_id_random", return_value={"name": "No YT", "id": 1, "pvs": []})
+    @patch("main.argparse.ArgumentParser")
+    def test_dry_run_returns_done_on_no_pv(self, mock_argparse, mock_rand, mock_pv):
+        from main import main
+        mock_argparse.return_value.parse_args.return_value = MagicMock(platform="dry-run", date=None)
+        result = main()
+        assert result == "done"
+
+
+class TestTwitterConfigSelection:
+    @patch("main.twitterauth.localhost_login", return_value=MagicMock())
+    @patch("main.cfg")
+    @patch("main.time.sleep")
+    @patch("main.post")
+    @patch("main.txt_builder", return_value="test text")
+    @patch("main.pvChecker", return_value="https://www.youtube.com/watch?v=abc")
+    @patch("main.song_id_random", return_value={"name": "Melt", "id": 1, "pvs": []})
+    @patch("main.argparse.ArgumentParser")
+    def test_uses_localhost_login_by_default(
+        self, mock_argparse, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep, mock_cfg, mock_localhost
+    ):
+        from main import main
+        mock_argparse.return_value.parse_args.return_value = MagicMock(platform="twitter")
+        mock_cfg.get.return_value = "false"
+        mock_sleep.side_effect = StopIteration
+        with pytest.raises(StopIteration):
+            main()
+        mock_localhost.assert_called_once()
+
+    @patch("main.twitterauth.flask_login", return_value=MagicMock())
+    @patch("main.cfg")
+    @patch("main.time.sleep")
+    @patch("main.post")
+    @patch("main.txt_builder", return_value="test text")
+    @patch("main.pvChecker", return_value="https://www.youtube.com/watch?v=abc")
+    @patch("main.song_id_random", return_value={"name": "Melt", "id": 1, "pvs": []})
+    @patch("main.argparse.ArgumentParser")
+    def test_uses_flask_login_when_configured(
+        self, mock_argparse, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep, mock_cfg, mock_flask
+    ):
+        from main import main
+        mock_argparse.return_value.parse_args.return_value = MagicMock(platform="twitter")
+        mock_cfg.get.return_value = "true"
+        mock_sleep.side_effect = StopIteration
+        with pytest.raises(StopIteration):
+            main()
+        mock_flask.assert_called_once()

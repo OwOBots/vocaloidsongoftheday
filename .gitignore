@@ -5,3 +5,5 @@ __pycache__/
 .venv/
 uv.lock
 .idea/
+# yes i use ai to write code, sue me
+CLAUDE.md

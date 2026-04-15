@@ -1,6 +1,8 @@
 import pytest
 import json
+import threading
 import time as time_module
+import flask
 from unittest.mock import patch, MagicMock
 
 
@@ -72,6 +74,137 @@ class TestTokenPersistence:
         with patch("twitterauth.TOKEN_FILE", str(token_file)):
             from twitterauth import _load_token
             assert _load_token() is None
+
+
+class TestFlaskLogin:
+    @patch("twitterauth._load_token")
+    @patch.dict("os.environ", {
+        "TWITTER_CLIENT_ID": "cid",
+        "TWITTER_CLIENT_SECRET": "csecret",
+    })
+    def test_reuses_saved_token(self, mock_load):
+        from twitterauth import flask_login
+        saved_token = {"access_token": "saved_tok", "expires_at": time_module.time() + 3600}
+        mock_load.return_value = saved_token
+
+        with patch("tweepy.Client"):
+            result = flask_login()
+
+        assert result._token == saved_token
+
+    @patch("twitterauth._save_token")
+    @patch("twitterauth._load_token")
+    @patch("builtins.print")
+    @patch("tweepy.OAuth2UserHandler")
+    @patch.dict("os.environ", {
+        "TWITTER_CLIENT_ID": "cid",
+        "TWITTER_CLIENT_SECRET": "csecret",
+    })
+    def test_fresh_login_starts_flask_and_loads_token(self, mock_handler_cls, mock_print, mock_load, mock_save):
+        from twitterauth import flask_login
+
+        mock_handler = MagicMock()
+        mock_handler.get_authorization_url.return_value = "https://twitter.com/auth"
+        token = {"access_token": "tok", "expires_at": time_module.time() + 3600}
+        mock_handler.fetch_token.return_value = token
+        mock_handler_cls.return_value = mock_handler
+
+        mock_load.side_effect = [None, token]
+
+        # Pre-set event so token_ready.wait() returns immediately
+        pre_set_event = threading.Event()
+        pre_set_event.set()
+
+        with patch("tweepy.Client"), \
+             patch("flask.Flask") as mock_flask_cls, \
+             patch("twitterauth.threading.Event", return_value=pre_set_event), \
+             patch("twitterauth.threading.Thread") as mock_thread_cls:
+            mock_app = MagicMock()
+            mock_flask_cls.return_value = mock_app
+            mock_thread = MagicMock()
+            mock_thread_cls.return_value = mock_thread
+            result = flask_login()
+
+        mock_thread.start.assert_called_once()
+        assert result._token == token
+
+    @patch("twitterauth._load_token")
+    @patch("builtins.print")
+    @patch("tweepy.OAuth2UserHandler")
+    @patch.dict("os.environ", {
+        "TWITTER_CLIENT_ID": "cid",
+        "TWITTER_CLIENT_SECRET": "csecret",
+    })
+    def test_raises_when_no_token_after_flask(self, mock_handler_cls, mock_print, mock_load):
+        from twitterauth import flask_login
+
+        mock_handler = MagicMock()
+        mock_handler.get_authorization_url.return_value = "https://twitter.com/auth"
+        mock_handler_cls.return_value = mock_handler
+
+        mock_load.side_effect = [None, None]
+
+        pre_set_event = threading.Event()
+        pre_set_event.set()
+
+        with patch("flask.Flask") as mock_flask_cls, \
+             patch("twitterauth.threading.Event", return_value=pre_set_event), \
+             patch("twitterauth.threading.Thread") as mock_thread_cls, \
+             pytest.raises(Exception, match="Failed to obtain Twitter token"):
+            mock_flask_cls.return_value = MagicMock()
+            mock_thread_cls.return_value = MagicMock()
+            flask_login()
+
+    @patch("twitterauth._save_token")
+    @patch("twitterauth._load_token", return_value=None)
+    @patch("builtins.print")
+    @patch("tweepy.OAuth2UserHandler")
+    @patch.dict("os.environ", {
+        "TWITTER_CLIENT_ID": "cid",
+        "TWITTER_CLIENT_SECRET": "csecret",
+    })
+    def test_callback_route_fetches_and_saves_token(self, mock_handler_cls, mock_print, mock_load, mock_save):
+        from twitterauth import flask_login
+
+        token = {"access_token": "cb_tok", "expires_at": time_module.time() + 3600}
+        mock_handler = MagicMock()
+        mock_handler.get_authorization_url.return_value = "https://twitter.com/auth"
+        mock_handler.fetch_token.return_value = token
+        mock_handler_cls.return_value = mock_handler
+
+        # Capture the Flask app so we can invoke the callback route directly
+        with patch("flask.Flask") as mock_flask_cls, \
+             patch("tweepy.Client"), \
+             patch("twitterauth.threading.Thread") as mock_thread_cls:
+            mock_app = MagicMock()
+            routes = {}
+
+            def capture_route(rule, **kwargs):
+                def decorator(f):
+                    routes[rule] = f
+                    return f
+                return decorator
+
+            mock_app.route = capture_route
+            mock_flask_cls.return_value = mock_app
+
+            # When the thread starts, run its target (which calls app.run) synchronously,
+            # but first simulate the callback being hit during app.run
+            def start_side_effect():
+                mock_request = MagicMock()
+                mock_request.url = "http://localhost:5000/callback?code=abc&state=xyz"
+                with patch.object(flask, "request", mock_request):
+                    routes["/callback"]()
+
+            mock_thread = MagicMock()
+            mock_thread.start.side_effect = start_side_effect
+            mock_thread_cls.return_value = mock_thread
+            mock_load.side_effect = [None, token]
+
+            flask_login()
+
+        mock_handler.fetch_token.assert_called_once_with("http://localhost:5000/callback?code=abc&state=xyz")
+        mock_save.assert_called_once_with(token)
 
 
 class TestLocalhostLogin:

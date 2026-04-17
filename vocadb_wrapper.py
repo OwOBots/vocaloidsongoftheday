@@ -38,7 +38,7 @@ class VocaDB:
         url = f"{self.BASE_URL}/{path}"
         merged = {**self.default_params, **params}
         logger.debug("GET {} params={}", url, merged)
-        response = self.session.get(url, params=merged)
+        response = self.session.get(url, params=merged, timeout=10)
         try:
             response.raise_for_status()
         except requests.HTTPError as e:

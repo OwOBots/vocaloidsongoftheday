@@ -39,21 +39,31 @@ class TwitterPKCEClient:
         self._client_secret = client_secret
         self._client = tweepy.Client(token["access_token"])
 
+    def _refresh(self):
+        from requests_oauthlib import OAuth2Session
+        session = OAuth2Session(self._client_id, token=self._token)
+        self._token = session.refresh_token(
+            "https://api.twitter.com/2/oauth2/token",
+            auth=HTTPBasicAuth(self._client_id, self._client_secret),
+            client_id=self._client_id,
+        )
+        self._client = tweepy.Client(self._token["access_token"])
+        _save_token(self._token)
+
     def _refresh_if_needed(self):
         if time.time() >= self._token.get("expires_at", 0) - 60:
-            from requests_oauthlib import OAuth2Session
-            session = OAuth2Session(self._client_id, token=self._token)
-            self._token = session.refresh_token(
-                "https://api.twitter.com/2/oauth2/token",
-                auth=HTTPBasicAuth(self._client_id, self._client_secret),
-                client_id=self._client_id,
-            )
-            self._client = tweepy.Client(self._token["access_token"])
-            _save_token(self._token)
+            self._refresh()
 
     def create_tweet(self, **kwargs):
         self._refresh_if_needed()
-        return self._client.create_tweet(**kwargs,user_auth=False)
+        try:
+            return self._client.create_tweet(**kwargs, user_auth=False)
+        except tweepy.errors.BadRequest as e:
+            if "token was invalid" in str(e):
+                logger.warning("Token rejected by Twitter, forcing refresh")
+                self._refresh()
+                return self._client.create_tweet(**kwargs, user_auth=False)
+            raise
 
 def flask_login() -> TwitterPKCEClient:
     app = flask.Flask(__name__)

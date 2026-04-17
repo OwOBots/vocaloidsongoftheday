@@ -4,6 +4,7 @@ import time
 import argparse
 from urllib.parse import urlparse
 import json
+
 import requests as req
 from vocadb_wrapper import VocaDB
 import random
@@ -49,14 +50,35 @@ def song_id_random() -> dict | None:
     :rtype: dict | None
     """
     rng = random.randint(0, 1000000)
-    song = db.song(song_id=rng, fields="pvs,Artists,Albums")
-    logger.debug(f"Trying to fetch song with ID {rng}")
-    if song is not None:
-        logger.debug(f"Successfully fetched song: {song['name']}")
-        return song
-    else:
-        logger.debug(f"No song found with ID {rng}")
+    try:
+        logger.debug(f"Trying to fetch song with ID {rng}")
+        song = db.song(song_id=rng, fields="pvs,Artists,Albums")
+        if song is not None:
+            logger.debug(f"Successfully fetched song: {song['name']}")
+            return song
+        else:
+            logger.debug(f"No song found with ID {rng}")
+            return None
+    except req.HTTPError as e:
+        logger.error(f"HTTP error while fetching song with ID {rng}: {e}")
         return None
+
+
+def find_song_with_pv(max_attempts=50):
+    for _ in range(max_attempts):
+        try:
+            song = song_id_random()
+        except Exception as e:
+            logger.warning(f"VocaDB API error: {e}")
+            time.sleep(5)
+            continue
+        if song is None:
+            continue
+        logger.info(f"Fetched song: {song['name']} (ID: {song['id']})")
+        pv_url = pvChecker(song)
+        if pv_url is not None:
+            return song, pv_url
+    return None, None
 
 
 def pvChecker(song) -> str | None:
@@ -131,21 +153,7 @@ def main():
     max_song_attempts = 50
 
     if args.platform == "dry-run":
-        pv_url = None
-        song = None
-        for _ in range(max_song_attempts):
-            try:
-                song = song_id_random()
-            except Exception as e:
-                logger.warning(f"VocaDB API error: {e}")
-                time.sleep(5)
-                continue
-            if song is None:
-                continue
-            logger.info(f"Fetched song: {song['name']} (ID: {song['id']})")
-            pv_url = pvChecker(song)
-            if pv_url is not None:
-                break
+        song, pv_url = find_song_with_pv(max_song_attempts)
         if pv_url is None:
             logger.error(f"Failed to find a song with a YouTube PV after {max_song_attempts} attempts.")
             return "done"
@@ -158,21 +166,7 @@ def main():
         return "done"
 
     while True:
-        pv_url = None
-        song = None
-        for _ in range(max_song_attempts):
-            try:
-                song = song_id_random()
-            except Exception as e:
-                logger.warning(f"VocaDB API error: {e}")
-                time.sleep(5)
-                continue
-            if song is None:
-                continue
-            logger.info(f"Fetched song: {song['name']} (ID: {song['id']})")
-            pv_url = pvChecker(song)
-            if pv_url is not None:
-                break
+        song, pv_url = find_song_with_pv(max_song_attempts)
         if pv_url is None:
             logger.error(
                 f"Failed to find a song with a YouTube PV after {max_song_attempts} attempts, will retry next cycle.")

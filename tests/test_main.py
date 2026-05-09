@@ -1,5 +1,6 @@
 import datetime
 import json
+import time
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock, mock_open
 
@@ -281,6 +282,8 @@ class TestBuildBskyEmbed:
 class TestMainRetryLogic:
     """Tests for the retry and error handling logic in main()."""
 
+    @patch("main.get_sleep_duration", return_value=21600)
+    @patch("main.save_next_post_time")
     @patch("main.asyncio.sleep", new_callable=AsyncMock)
     @patch("main.post", new_callable=AsyncMock)
     @patch("main.txt_builder", return_value="test text")
@@ -289,7 +292,8 @@ class TestMainRetryLogic:
     @patch("main.blueauth.blue_login", new_callable=AsyncMock, return_value=MagicMock())
     @patch("main.argparse.ArgumentParser")
     async def test_posts_successfully_on_first_try(
-        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep,
+        mock_save, mock_get_sleep
     ):
         from main import main
 
@@ -300,6 +304,8 @@ class TestMainRetryLogic:
             await main()
         mock_post.assert_called_once()
 
+    @patch("main.get_sleep_duration", return_value=21600)
+    @patch("main.save_next_post_time")
     @patch("main.asyncio.sleep", new_callable=AsyncMock)
     @patch("main.post", new_callable=AsyncMock)
     @patch("main.txt_builder", return_value="test text")
@@ -308,7 +314,8 @@ class TestMainRetryLogic:
     @patch("main.blueauth.blue_login", new_callable=AsyncMock, return_value=MagicMock())
     @patch("main.argparse.ArgumentParser")
     async def test_retries_on_api_exception(
-        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep,
+        mock_save, mock_get_sleep
     ):
         from main import main
 
@@ -324,6 +331,8 @@ class TestMainRetryLogic:
         assert mock_rand.call_count == 2
         mock_post.assert_called_once()
 
+    @patch("main.get_sleep_duration", return_value=21600)
+    @patch("main.save_next_post_time")
     @patch("main.asyncio.sleep", new_callable=AsyncMock)
     @patch("main.post", new_callable=AsyncMock)
     @patch("main.txt_builder", return_value="test text")
@@ -332,7 +341,8 @@ class TestMainRetryLogic:
     @patch("main.blueauth.blue_login", new_callable=AsyncMock, return_value=MagicMock())
     @patch("main.argparse.ArgumentParser")
     async def test_gives_up_after_max_attempts(
-        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep,
+        mock_save, mock_get_sleep
     ):
         from main import main
 
@@ -344,6 +354,8 @@ class TestMainRetryLogic:
         assert mock_rand.call_count == 50
         mock_post.assert_not_called()
 
+    @patch("main.get_sleep_duration", return_value=21600)
+    @patch("main.save_next_post_time")
     @patch("main.asyncio.sleep", new_callable=AsyncMock)
     @patch("main.post", new_callable=AsyncMock)
     @patch("main.txt_builder", return_value="test text")
@@ -352,7 +364,8 @@ class TestMainRetryLogic:
     @patch("main.blueauth.blue_login", new_callable=AsyncMock, return_value=MagicMock())
     @patch("main.argparse.ArgumentParser")
     async def test_retries_failed_posts(
-        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep,
+        mock_save, mock_get_sleep
     ):
         from main import main
 
@@ -364,6 +377,8 @@ class TestMainRetryLogic:
             await main()
         assert mock_post.call_count == 3
 
+    @patch("main.get_sleep_duration", return_value=21600)
+    @patch("main.save_next_post_time")
     @patch("main.asyncio.sleep", new_callable=AsyncMock)
     @patch("main.post", new_callable=AsyncMock)
     @patch("main.txt_builder", return_value="test text")
@@ -372,7 +387,8 @@ class TestMainRetryLogic:
     @patch("main.blueauth.blue_login", new_callable=AsyncMock, return_value=MagicMock())
     @patch("main.argparse.ArgumentParser")
     async def test_gives_up_posting_after_5_failures(
-        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep
+        self, mock_argparse, mock_login, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep,
+        mock_save, mock_get_sleep
     ):
         from main import main
 
@@ -422,6 +438,8 @@ class TestMainDryRun:
 
 
 class TestTwitterConfigSelection:
+    @patch("main.get_sleep_duration", return_value=21600)
+    @patch("main.save_next_post_time")
     @patch("main.twitterauth.localhost_login", return_value=MagicMock())
     @patch("main.cfg")
     @patch("main.asyncio.sleep", new_callable=AsyncMock)
@@ -431,7 +449,8 @@ class TestTwitterConfigSelection:
     @patch("main.song_id_random", new_callable=AsyncMock, return_value={"name": "Melt", "id": 1, "pvs": []})
     @patch("main.argparse.ArgumentParser")
     async def test_uses_localhost_login_by_default(
-        self, mock_argparse, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep, mock_cfg, mock_localhost
+        self, mock_argparse, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep, mock_cfg, mock_localhost,
+        mock_save, mock_get_sleep
     ):
         from main import main
         mock_argparse.return_value.parse_args.return_value = MagicMock(platform="twitter")
@@ -441,6 +460,8 @@ class TestTwitterConfigSelection:
             await main()
         mock_localhost.assert_called_once()
 
+    @patch("main.get_sleep_duration", return_value=21600)
+    @patch("main.save_next_post_time")
     @patch("main.twitterauth.flask_login", return_value=MagicMock())
     @patch("main.cfg")
     @patch("main.asyncio.sleep", new_callable=AsyncMock)
@@ -450,7 +471,8 @@ class TestTwitterConfigSelection:
     @patch("main.song_id_random", new_callable=AsyncMock, return_value={"name": "Melt", "id": 1, "pvs": []})
     @patch("main.argparse.ArgumentParser")
     async def test_uses_flask_login_when_configured(
-        self, mock_argparse, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep, mock_cfg, mock_flask
+        self, mock_argparse, mock_rand, mock_pv, mock_txt, mock_post, mock_sleep, mock_cfg, mock_flask,
+        mock_save, mock_get_sleep
     ):
         from main import main
         mock_argparse.return_value.parse_args.return_value = MagicMock(platform="twitter")
@@ -459,3 +481,67 @@ class TestTwitterConfigSelection:
         with pytest.raises(_BreakLoop):
             await main()
         mock_flask.assert_called_once()
+
+
+class TestTimerCache:
+    @patch("main.TIMER_CACHE_FILE", "test_timer_cache.json")
+    @patch("main.CYCLE_INTERVAL", 21600)
+    @patch("main.time.time", return_value=1000000.0)
+    def test_save_next_post_time_writes_valid_json(self, mock_time):
+        from main import save_next_post_time
+        m = mock_open()
+        with patch("builtins.open", m):
+            save_next_post_time()
+        m.assert_called_once_with("test_timer_cache.json", "w")
+        written = "".join(call.args[0] for call in m().write.call_args_list)
+        data = json.loads(written)
+        assert data == {"next_post_utc": 1000000.0 + 21600}
+
+    @patch("main.TIMER_CACHE_FILE", "test_timer_cache.json")
+    @patch("main.CYCLE_INTERVAL", 21600)
+    @patch("main.time.time", return_value=1000000.0)
+    def test_get_sleep_duration_returns_remaining_time(self, mock_time):
+        from main import get_sleep_duration
+        # next post is 10000 seconds from now
+        cache_data = json.dumps({"next_post_utc": 1010000.0})
+        with patch("builtins.open", mock_open(read_data=cache_data)):
+            result = get_sleep_duration()
+        assert result == 10000.0
+
+    @patch("main.TIMER_CACHE_FILE", "test_timer_cache.json")
+    @patch("main.CYCLE_INTERVAL", 21600)
+    def test_get_sleep_duration_returns_cycle_interval_when_file_missing(self):
+        from main import get_sleep_duration
+        with patch("builtins.open", side_effect=FileNotFoundError):
+            result = get_sleep_duration()
+        assert result == 21600
+
+    @patch("main.TIMER_CACHE_FILE", "test_timer_cache.json")
+    @patch("main.CYCLE_INTERVAL", 21600)
+    def test_get_sleep_duration_returns_cycle_interval_when_file_corrupt(self):
+        from main import get_sleep_duration
+        with patch("builtins.open", mock_open(read_data="not valid json{{")):
+            result = get_sleep_duration()
+        assert result == 21600
+
+    @patch("main.TIMER_CACHE_FILE", "test_timer_cache.json")
+    @patch("main.CYCLE_INTERVAL", 21600)
+    @patch("main.time.time", return_value=1000000.0)
+    def test_get_sleep_duration_clamps_to_zero_when_past(self, mock_time):
+        from main import get_sleep_duration
+        # next post was 500 seconds ago
+        cache_data = json.dumps({"next_post_utc": 999500.0})
+        with patch("builtins.open", mock_open(read_data=cache_data)):
+            result = get_sleep_duration()
+        assert result == 0
+
+    @patch("main.TIMER_CACHE_FILE", "test_timer_cache.json")
+    @patch("main.CYCLE_INTERVAL", 21600)
+    @patch("main.time.time", return_value=1000000.0)
+    def test_get_sleep_duration_clamps_to_cycle_interval_when_too_far(self, mock_time):
+        from main import get_sleep_duration
+        # next post is 50000 seconds from now (more than CYCLE_INTERVAL)
+        cache_data = json.dumps({"next_post_utc": 1050000.0})
+        with patch("builtins.open", mock_open(read_data=cache_data)):
+            result = get_sleep_duration()
+        assert result == 21600

@@ -4,6 +4,7 @@ import sys
 import argparse
 from urllib.parse import urlparse
 import json
+import time
 
 import httpx
 from vocadb_wrapper import VocaDB
@@ -23,6 +24,7 @@ MAX_SONG_ATTEMPTS = cfg.getint("general", "max_song_attempts", fallback=50)
 MAX_POST_ATTEMPTS = cfg.getint("general", "max_post_attempts", fallback=5)
 POST_RETRY_BACKOFF = cfg.getint("general", "post_retry_backoff_seconds", fallback=30)
 CYCLE_INTERVAL = cfg.getint("general", "cycle_interval_seconds", fallback=21600)
+TIMER_CACHE_FILE = cfg.get("general", "timer_cache_file", fallback="timer_cache.json")
 
 db = VocaDB()
 logger.add(sys.stderr, format="{time} {level} {message}", filter="main", level="INFO")
@@ -140,6 +142,28 @@ async def build_bsky_embed(client, url: str):
         logger.warning(f"Failed to build Bluesky embed for {url}: {e}")
         return None
 
+def save_next_post_time():
+    next_post_utc = time.time() + CYCLE_INTERVAL
+    try:
+        with open(TIMER_CACHE_FILE, "w") as f:
+            json.dump({"next_post_utc": next_post_utc}, f)
+        logger.debug(f"Saved next post time: {next_post_utc}")
+    except OSError as e:
+        logger.warning(f"Failed to save timer cache: {e}")
+
+
+def get_sleep_duration():
+    try:
+        with open(TIMER_CACHE_FILE, "r") as f:
+            data = json.load(f)
+        remaining = data["next_post_utc"] - time.time()
+        clamped = max(0, min(remaining, CYCLE_INTERVAL))
+        logger.debug(f"Timer cache: {remaining:.0f}s remaining, clamped to {clamped:.0f}s")
+        return clamped
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
+        logger.warning(f"Failed to read timer cache: {e}, using default interval")
+        return CYCLE_INTERVAL
+
 
 async def post(client, platform: str, text: str, url: str):
     if platform == "twitter":
@@ -196,7 +220,8 @@ async def main():
         if pv_url is None:
             logger.error(
                 f"Failed to find a song with a YouTube PV after {MAX_SONG_ATTEMPTS} attempts, will retry next cycle.")
-            await asyncio.sleep(CYCLE_INTERVAL)
+            save_next_post_time()
+            await asyncio.sleep(get_sleep_duration())
             continue
         text = txt_builder(song)
         for attempt in range(MAX_POST_ATTEMPTS):
@@ -209,7 +234,8 @@ async def main():
                 await asyncio.sleep(POST_RETRY_BACKOFF * (attempt + 1))
         else:
             logger.error(f"Failed to post after {MAX_POST_ATTEMPTS} attempts, will retry next cycle.")
-        await asyncio.sleep(CYCLE_INTERVAL)
+        save_next_post_time()
+        await asyncio.sleep(get_sleep_duration())
 
 
 if __name__ == "__main__":

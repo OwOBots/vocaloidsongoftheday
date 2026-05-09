@@ -58,11 +58,69 @@ class TestPvChecker:
         song = {"name": "Empty PVs", "pvs": []}
         assert pv_checker(song) is None
 
-    def test_returns_none_when_no_youtube(self):
+    def test_returns_none_when_no_supported_pv(self):
+        from main import pv_checker
+        song = {
+            "name": "Unsupported Only",
+            "pvs": [{"url": "https://www.bilibili.com/video/BV123"}],
+        }
+        assert pv_checker(song) is None
+
+    def test_returns_niconico_when_no_youtube(self):
         from main import pv_checker
         song = {
             "name": "NND Only",
             "pvs": [{"url": "https://www.nicovideo.jp/watch/sm456"}],
+        }
+        assert pv_checker(song) == "https://www.nicovideo.jp/watch/sm456"
+
+    def test_prefers_youtube_over_niconico(self):
+        from main import pv_checker
+        song = {
+            "name": "Both PVs",
+            "pvs": [
+                {"url": "https://www.nicovideo.jp/watch/sm123"},
+                {"url": "https://www.youtube.com/watch?v=abc123"},
+            ],
+        }
+        assert pv_checker(song) == "https://www.youtube.com/watch?v=abc123"
+
+    def test_prefers_youtube_over_niconico_reversed_order(self):
+        from main import pv_checker
+        song = {
+            "name": "Both PVs Reversed",
+            "pvs": [
+                {"url": "https://www.youtube.com/watch?v=abc123"},
+                {"url": "https://www.nicovideo.jp/watch/sm123"},
+            ],
+        }
+        assert pv_checker(song) == "https://www.youtube.com/watch?v=abc123"
+
+    def test_accepts_nico_ms_short_url(self):
+        from main import pv_checker
+        song = {
+            "name": "Short NND",
+            "pvs": [{"url": "https://nico.ms/sm456"}],
+        }
+        assert pv_checker(song) == "https://nico.ms/sm456"
+
+    def test_accepts_bare_nicovideo_domain(self):
+        from main import pv_checker
+        song = {
+            "name": "Bare NND",
+            "pvs": [{"url": "https://nicovideo.jp/watch/sm789"}],
+        }
+        assert pv_checker(song) == "https://nicovideo.jp/watch/sm789"
+
+    def test_rejects_spoofed_niconico_domain(self):
+        from main import pv_checker
+        song = {
+            "name": "Spoofed NND",
+            "pvs": [
+                {"url": "https://nicovideo.jp.evil.com/watch/sm123"},
+                {"url": "https://notnicovideo.jp/watch/sm456"},
+                {"url": "https://nico.ms.evil.com/sm789"},
+            ],
         }
         assert pv_checker(song) is None
 

@@ -94,17 +94,29 @@ def pv_checker(song) -> str | None:
     if "pvs" not in song or len(song["pvs"]) == 0:
         logger.info(f"No PV found for song '{song['name']}'")
         return None
-    #TODO: niconico pvs are common. add support for them
+    youtube_url = None
+    niconico_url = None
     for pv in song["pvs"]:
         host = urlparse(pv["url"]).hostname or ""
-        if host in ("www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be"):
-            logger.info(f"YouTube PV found for song '{song['name']}': {pv['url']}")
-            return pv["url"]
-    logger.debug(f"No YouTube PV for song '{song['name']}', skipping.")
+        if youtube_url is None and host in ("www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be"):
+            youtube_url = pv["url"]
+        if niconico_url is None and host in ("www.nicovideo.jp", "nicovideo.jp", "nico.ms"):
+            niconico_url = pv["url"]
+    if youtube_url:
+        logger.info(f"YouTube PV found for song '{song['name']}': {youtube_url}")
+        return youtube_url
+    if niconico_url:
+        logger.info(f"NicoNico PV found for song '{song['name']}': {niconico_url}")
+        return niconico_url
+    logger.debug(f"No supported PV for song '{song['name']}', skipping.")
     return None
 
 
 async def build_bsky_embed(client, url: str):
+    host = urlparse(url).hostname or ""
+    if host not in ("www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be"):
+        logger.debug(f"Skipping embed for non-YouTube URL: {url}")
+        return None
     try:
         async with httpx.AsyncClient() as http:
             oembed_resp = await http.get(

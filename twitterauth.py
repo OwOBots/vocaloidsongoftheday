@@ -5,14 +5,16 @@ import json
 import threading
 import tweepy
 from requests.auth import HTTPBasicAuth
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 from loguru import logger
 import flask
-#todo: there are 30 different ways in this one file. i could do a refactor and add a config file.... nah, this is fine for now. maybe later if i add more services or something. but for now, this is just gonna be a bit of a mess. sorry future me.
+
 load_dotenv()
 logger.add(sys.stderr, format="{time} {level} {message}", filter="main", level="INFO")
 
 TOKEN_FILE = os.environ.get("TWITTER_TOKEN_FILE", "twitter_token.json")
+_OAUTH_SCOPES = ["tweet.read", "tweet.write", "users.read", "offline.access"]
 
 
 def _save_token(token):
@@ -29,7 +31,16 @@ def _load_token() -> dict | None:
         return token
     return None
 
-# god there has to be a better way to do this.
+
+def _make_oauth_handler(client_id, client_secret):
+    return tweepy.OAuth2UserHandler(
+        client_id=client_id,
+        redirect_uri=os.environ.get("TWITTER_REDIRECT_URI", "http://localhost:5000/callback"),
+        scope=_OAUTH_SCOPES,
+        client_secret=client_secret,
+    )
+
+
 class TwitterPKCEClient:
     """Wraps tweepy.Client with automatic OAuth 2.0 PKCE token refresh."""
 
@@ -65,6 +76,7 @@ class TwitterPKCEClient:
                 return self._client.create_tweet(**kwargs, user_auth=False)
             raise
 
+
 def flask_login() -> TwitterPKCEClient:
     app = flask.Flask(__name__)
     token_ready = threading.Event()
@@ -83,22 +95,20 @@ def flask_login() -> TwitterPKCEClient:
     if token is not None:
         return TwitterPKCEClient(token, client_id, client_secret)
 
-    handler = tweepy.OAuth2UserHandler(
-        client_id=client_id,
-        # must match the redirect URI set in the Twitter developer portal for this app
-        redirect_uri=os.environ.get("TWITTER_REDIRECT_URI", "http://localhost:5000/callback"),
-        scope=["tweet.read", "tweet.write", "users.read", "offline.access"],
-        client_secret=client_secret,
-    )
+    handler = _make_oauth_handler(client_id, client_secret)
+    redirect_uri = os.environ.get("TWITTER_REDIRECT_URI", "http://localhost:5000/callback")
+    port = int(urlparse(redirect_uri).port or 5000)
     print(f"Please go to this URL and authorize the app:\n{handler.get_authorization_url()}")
-    # run flask in a daemon thread so the main thread can continue once the callback fires
-    server = threading.Thread(target=lambda: app.run(port=5000), daemon=True)
+    server = threading.Thread(target=lambda: app.run(port=port), daemon=True)
     server.start()
-    token_ready.wait()
+    token_ready.wait(timeout=300)
+    if not token_ready.is_set():
+        raise TimeoutError("Twitter OAuth callback did not fire within 5 minutes")
     token = _load_token()
     if token is None:
-        raise Exception("Failed to obtain Twitter token")
+        raise RuntimeError("Failed to obtain Twitter token")
     return TwitterPKCEClient(token, client_id, client_secret)
+
 
 def localhost_login() -> TwitterPKCEClient:
     client_id = os.environ["TWITTER_CLIENT_ID"]
@@ -108,13 +118,7 @@ def localhost_login() -> TwitterPKCEClient:
     if token is not None:
         return TwitterPKCEClient(token, client_id, client_secret)
 
-    handler = tweepy.OAuth2UserHandler(
-        client_id=client_id,
-        # must match the redirect URI set in the Twitter developer portal for this app
-        redirect_uri=os.environ.get("TWITTER_REDIRECT_URI", "http://localhost:5000/callback"),
-        scope=["tweet.read", "tweet.write", "users.read", "offline.access"],
-        client_secret=client_secret,
-    )
+    handler = _make_oauth_handler(client_id, client_secret)
     print(f"Please go to this URL and authorize the app:\n{handler.get_authorization_url()}")
     redirected_url = input("Paste the full redirect URL here: ")
     token = handler.fetch_token(redirected_url)
